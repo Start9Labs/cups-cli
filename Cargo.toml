@@ -1,5 +1,5 @@
 [package]
-name = "whisper-cli"
+name = "cups-cli"
 version = "0.1.0"
 authors = ["Aiden McClelland <me@drbonez.dev>"]
 edition = "2018"

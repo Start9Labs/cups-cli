@@ -40,10 +40,10 @@ fn pubkey_to_onion(pubkey: &[u8]) -> Result<String, Error> {
 }
 
 fn inner_main() -> Result<(), Error> {
-    let app = App::new("Whisper CLI")
+    let app = App::new("Cups CLI")
         .version("0.1.0")
         .author("Aiden McClelland <me@drbonez.dev>")
-        .about("Interact with Whisper")
+        .about("Interact with Cups")
         .arg(
             Arg::with_name("password")
                 .long("password")
