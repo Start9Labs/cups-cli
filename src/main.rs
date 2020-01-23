@@ -2,44 +2,11 @@ use std::net::IpAddr;
 
 use clap::{App, Arg, SubCommand};
 use failure::Error;
-use reqwest::blocking as rq;
-use sha3::{Digest, Sha3_256};
 
-fn onion_to_pubkey(onion: &str) -> Result<Vec<u8>, Error> {
-    let s = onion.split(".").next().unwrap();
-    let mut b = base32::decode(base32::Alphabet::RFC4648 { padding: false }, s)
-        .ok_or_else(|| failure::format_err!("invalid base32"))?;
-    failure::ensure!(b.len() >= 35, "invalid base32 length");
-    failure::ensure!(b[34] == 3, "invalid version");
-    let pubkey = &b[..32];
-    let mut hasher = Sha3_256::new();
-    hasher.input(b".onion checksum");
-    hasher.input(pubkey);
-    hasher.input(&[3]);
-    failure::ensure!(&b[32..34] == &hasher.result()[..2], "invalid checksum");
-    b.truncate(32);
-    Ok(b)
-}
+#[cfg(feature = "tui")]
+mod tui;
 
-fn pubkey_to_onion(pubkey: &[u8]) -> Result<String, Error> {
-    if pubkey.len() != 32 {
-        failure::bail!("invalid pubkey length")
-    }
-    let mut hasher = Sha3_256::new();
-    hasher.input(b".onion checksum");
-    hasher.input(pubkey);
-    hasher.input(&[3]);
-    let mut onion = Vec::with_capacity(35);
-    onion.extend_from_slice(pubkey);
-    onion.extend_from_slice(&hasher.result()[..2]);
-    onion.push(3);
-    Ok(format!(
-        "{}.onion",
-        base32::encode(base32::Alphabet::RFC4648 { padding: false }, &onion).to_lowercase()
-    ))
-}
-
-fn inner_main() -> Result<(), Error> {
+async fn inner_main() -> Result<(), Error> {
     let app = App::new("Cups CLI")
         .version("0.1.0")
         .author("Aiden McClelland <me@drbonez.dev>")
@@ -87,7 +54,7 @@ fn inner_main() -> Result<(), Error> {
                     SubCommand::with_name("show")
                         .alias("list")
                         .alias("ls")
-                        .about("Display contact book")
+                        .about("Display messages with a user")
                         .arg(
                             Arg::with_name("ADDRESS")
                                 .help("User to show conversation with")
@@ -126,20 +93,11 @@ fn inner_main() -> Result<(), Error> {
         .transpose()?
         .or(host)
         .unwrap();
+    let creds = cupslib::Creds { host, password };
     match matches.subcommand() {
         ("contacts", Some(sub_m)) => match sub_m.subcommand() {
             ("show", _) | ("list", _) | ("ls", _) => {
                 use prettytable::{Cell, Row, Table};
-                use std::io::Read;
-
-                let mut res = rq::Client::new()
-                    .get(&format!("http://{}:59001?type=users", host))
-                    .basic_auth("me", Some(&password))
-                    .send()?;
-                let status = res.status();
-                if !status.is_success() {
-                    failure::bail!("{}", status.canonical_reason().unwrap_or("UNKNOWN STATUS"));
-                }
 
                 let mut table = Table::new();
                 table.add_row(Row::new(vec![
@@ -147,41 +105,22 @@ fn inner_main() -> Result<(), Error> {
                     Cell::new("NAME"),
                     Cell::new("UNREADS"),
                 ]));
-                loop {
-                    let mut row = Row::empty();
-                    let mut buf = [0; 32];
-                    match res.read_exact(&mut buf) {
-                        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                        a => a?,
-                    };
-                    row.add_cell(Cell::new(&pubkey_to_onion(&buf)?));
-                    let mut buf = [0; 8];
-                    res.read_exact(&mut buf)?;
-                    let unreads = u64::from_be_bytes(buf);
-                    let mut buf = [0];
-                    res.read_exact(&mut buf)?;
-                    let mut buf = vec![0; buf[0] as usize];
-                    res.read_exact(&mut buf)?;
-                    row.add_cell(Cell::new(&String::from_utf8(buf)?));
-                    row.add_cell(Cell::new(&format!("{}", unreads)));
-                    table.add_row(row);
+                for user in cupslib::fetch_users(&creds).await? {
+                    table.add_row(Row::new(vec![
+                        Cell::new(&cupslib::pubkey_to_onion(&user.id)?),
+                        Cell::new(&user.name.as_ref().map(|a| a.as_str()).unwrap_or("")),
+                        Cell::new(&format!("{}", user.unreads)),
+                    ]));
                 }
                 table.printstd();
             }
             ("add", Some(sub_sub_m)) => {
-                let mut req = Vec::new();
-                req.push(1);
-                req.extend_from_slice(&onion_to_pubkey(&sub_sub_m.value_of("ADDRESS").unwrap())?);
-                req.extend_from_slice(sub_sub_m.value_of("NAME").unwrap().as_bytes());
-                let status = rq::Client::new()
-                    .post(&format!("http://{}:59001", host))
-                    .basic_auth("me", Some(&password))
-                    .body(req)
-                    .send()?
-                    .status();
-                if !status.is_success() {
-                    failure::bail!("{}", status.canonical_reason().unwrap_or("UNKNOWN STATUS"));
-                }
+                cupslib::add_user(
+                    &creds,
+                    sub_sub_m.value_of("ADDRESS").unwrap(),
+                    sub_sub_m.value_of("NAME").unwrap(),
+                )
+                .await?
             }
             _ => {
                 app.print_long_help()?;
@@ -191,37 +130,6 @@ fn inner_main() -> Result<(), Error> {
         ("messages", Some(sub_m)) => match sub_m.subcommand() {
             ("show", Some(sub_sub_m)) | ("list", Some(sub_sub_m)) | ("ls", Some(sub_sub_m)) => {
                 use prettytable::{Cell, Row, Table};
-                use std::io::Read;
-
-                let mut res = rq::Client::new()
-                    .get(&if let Some(limit) = sub_sub_m.value_of("limit") {
-                        format!(
-                            "http://{}:59001?type=messages&pubkey={}&limit={}",
-                            host,
-                            base32::encode(
-                                base32::Alphabet::RFC4648 { padding: false },
-                                &onion_to_pubkey(&sub_sub_m.value_of("ADDRESS").unwrap())?
-                            )
-                            .to_lowercase(),
-                            limit
-                        )
-                    } else {
-                        format!(
-                            "http://{}:59001?type=messages&pubkey={}",
-                            host,
-                            base32::encode(
-                                base32::Alphabet::RFC4648 { padding: false },
-                                &onion_to_pubkey(&sub_sub_m.value_of("ADDRESS").unwrap())?
-                            )
-                            .to_lowercase()
-                        )
-                    })
-                    .basic_auth("me", Some(&password))
-                    .send()?;
-                let status = res.status();
-                if !status.is_success() {
-                    failure::bail!("{}", status.canonical_reason().unwrap_or("UNKNOWN STATUS"));
-                }
 
                 let mut table = Table::new();
                 table.add_row(Row::new(vec![
@@ -229,57 +137,37 @@ fn inner_main() -> Result<(), Error> {
                     Cell::new("TIME"),
                     Cell::new("MESSAGE"),
                 ]));
-                let mut msgs = Vec::new();
-                loop {
-                    let mut row = Row::empty();
-                    let mut buf = [0];
-                    match res.read_exact(&mut buf) {
-                        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                        a => a?,
-                    };
-                    row.add_cell(Cell::new(if buf[0] == 0 { "OUTBOUND" } else { "INBOUND" }));
-                    let mut buf = [0; 8];
-                    res.read_exact(&mut buf)?;
-                    let time = i64::from_be_bytes(buf);
-                    row.add_cell(Cell::new(&format!(
-                        "{}",
-                        chrono::DateTime::<chrono::Local>::from(if time > 0 {
-                            std::time::UNIX_EPOCH + std::time::Duration::from_secs(time as u64)
-                        } else {
-                            std::time::UNIX_EPOCH
-                                - std::time::Duration::from_secs(time.abs() as u64)
-                        })
-                    )));
-                    let mut buf = [0; 8];
-                    res.read_exact(&mut buf)?;
-                    let len = u64::from_be_bytes(buf);
-                    let mut buf = vec![0; len as usize];
-                    res.read_exact(&mut buf)?;
-                    row.add_cell(Cell::new(&String::from_utf8(buf)?));
-                    msgs.push(row);
-                }
+                let msgs = cupslib::fetch_messages(
+                    &creds,
+                    &cupslib::onion_to_pubkey(sub_sub_m.value_of("ADDRESS").unwrap())?,
+                    sub_sub_m.value_of("limit").map(|a| a.parse()).transpose()?,
+                )
+                .await?;
                 for msg in msgs.into_iter().rev() {
-                    table.add_row(msg);
+                    table.add_row(Row::new(vec![
+                        Cell::new(if msg.inbound { "INBOUND" } else { "OUTBOUND" }),
+                        Cell::new(&format!(
+                            "{}",
+                            chrono::DateTime::<chrono::Local>::from(if msg.time > 0 {
+                                std::time::UNIX_EPOCH
+                                    + std::time::Duration::from_secs(msg.time as u64)
+                            } else {
+                                std::time::UNIX_EPOCH
+                                    - std::time::Duration::from_secs(msg.time.abs() as u64)
+                            })
+                        )),
+                        Cell::new(&msg.content),
+                    ]));
                 }
                 table.printstd();
             }
             ("send", Some(sub_sub_m)) => {
-                let mut req = Vec::new();
-                req.push(0);
-                req.extend_from_slice(&onion_to_pubkey(&sub_sub_m.value_of("ADDRESS").unwrap())?);
-                req.extend_from_slice(sub_sub_m.value_of("MESSAGE").unwrap().as_bytes());
-                let status = rq::Client::new()
-                    .post(&format!("http://{}:59001", host))
-                    .basic_auth("me", Some(&password))
-                    .body(req)
-                    .send()?
-                    .status();
-                if !status.is_success() {
-                    failure::bail!(
-                        "{}",
-                        status.canonical_reason().unwrap_or("UNKNOWN STATUS CODE")
-                    );
-                }
+                cupslib::send_message(
+                    &creds,
+                    cupslib::onion_to_pubkey(sub_sub_m.value_of("ADDRESS").unwrap())?.as_ref(),
+                    sub_sub_m.value_of("MESSAGE").unwrap(),
+                )
+                .await?
             }
             _ => {
                 app.print_long_help()?;
@@ -287,16 +175,22 @@ fn inner_main() -> Result<(), Error> {
             }
         },
         _ => {
-            app.print_long_help()?;
-            println!();
+            #[cfg(feature = "tui")]
+            tui::tui(creds).await?;
+            #[cfg(not(feature = "tui"))]
+            {
+                app.print_long_help()?;
+                println!();
+            }
         }
     }
 
     Ok(())
 }
 
-fn main() {
-    match inner_main() {
+#[tokio::main]
+async fn main() {
+    match inner_main().await {
         Ok(_) => (),
         Err(e) => println!("{}", e),
     }
