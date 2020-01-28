@@ -6,7 +6,7 @@
 ### Build
 ```cargo build --release```
 ### Add to PATH
-```cp ./target/release/cups_cli /usr/local/bin```
+```cp ./target/release/cups-cli /usr/local/bin```
 
 ## Usage
 ### Base arguments
