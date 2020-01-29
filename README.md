@@ -1,15 +1,15 @@
 # C.U.P.S. CLI
 
-## Building
+## Install
 ### Requires Rust
 ```
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
 ```
-### Build
-```cargo build --release```
-### Add to PATH
-```cp ./target/release/cups-cli /usr/local/bin```
+### Install
+```
+cargo install cups-cli
+```
 
 ## Usage
 ### Base arguments (REQUIRED)
