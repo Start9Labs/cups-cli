@@ -5,6 +5,10 @@ authors = ["Aiden McClelland <me@drbonez.dev>"]
 edition = "2018"
 description = "A minimal client for Cups Instant Messanger"
 license = "Apache-2.0"
+repository = "https://github.com/Start9Labs/cups-cli"
+homepage = "https://github.com/Start9Labs/cups-cli"
+readme = "README.md"
+documentation = "http://docs.rs/cups-cli/"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
