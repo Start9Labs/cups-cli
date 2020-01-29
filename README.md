@@ -2,20 +2,23 @@
 
 ## Building
 ### Requires Rust
-```curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh```
+```
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+```
 ### Build
 ```cargo build --release```
 ### Add to PATH
 ```cp ./target/release/cups-cli /usr/local/bin```
 
 ## Usage
-### Base arguments
+### Base arguments (REQUIRED)
   - HOST
-    - Must be the LAN IP address of your C.U.P.S. server
-    - Can be set with either the `HOST` environment var or `-h` command line flag
+    - Must be the LAN IP or .local address of your C.U.P.S. server
+    - Can be set with either the `CUPS_HOST` environment var or `-h` command line flag
   - PASSWORD
     - Can be found in your Start9 Server config
-    - Can be set with either the `PASSWORD` environment var or `-p` command line flag
+    - Can be set with either the `CUPS_PASSWORD` environment var or `-p` command line flag
 ### Subcommands
   - contacts
     - show/list/ls

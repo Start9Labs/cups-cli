@@ -1,8 +1,7 @@
-use std::net::IpAddr;
-
 use failure::Error;
 use reqwest as rq;
 use sha3::{Digest, Sha3_256};
+use url::Host;
 
 pub struct Pubkey(pub [u8; 32]);
 impl AsRef<[u8; 32]> for Pubkey {
@@ -48,7 +47,7 @@ pub fn pubkey_to_onion(pubkey: &[u8]) -> Result<String, Error> {
 
 #[derive(Clone, Debug)]
 pub struct Creds {
-    pub host: IpAddr,
+    pub host: Host,
     pub password: String,
 }
 impl AsRef<Creds> for Creds {

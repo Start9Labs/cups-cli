@@ -281,6 +281,7 @@ dependencies = [
  "rpassword",
  "sha3",
  "tokio",
+ "url",
 ]
 
 [[package]]

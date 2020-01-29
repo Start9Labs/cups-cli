@@ -1,7 +1,6 @@
-use std::net::IpAddr;
-
 use clap::{App, Arg, SubCommand};
 use failure::Error;
+use url::Host;
 
 #[cfg(feature = "tui")]
 mod tui;
@@ -17,7 +16,7 @@ async fn inner_main() -> Result<(), Error> {
                 .short("p")
                 .takes_value(true),
         );
-    let host: Option<IpAddr> = std::env::var("HOST").ok().map(|a| a.parse()).transpose()?;
+    let host: Option<Host> = std::env::var("CUPS_HOST").ok().map(|a| Host::parse(&a)).transpose()?;
     let app = if host.is_none() {
         app.arg(
             Arg::with_name("host")
@@ -79,7 +78,7 @@ async fn inner_main() -> Result<(), Error> {
     let password = matches
         .value_of("password")
         .map(|a| a.to_owned())
-        .or_else(|| std::env::var("PASSWORD").ok())
+        .or_else(|| std::env::var("CUPS_PASSWORD").ok())
         .or_else(|| {
             use std::io::Write;
             print!("PASSWORD: ");
@@ -87,9 +86,9 @@ async fn inner_main() -> Result<(), Error> {
             rpassword::read_password().ok()
         })
         .ok_or_else(|| failure::format_err!("requires password"))?;
-    let host: IpAddr = matches
+    let host: Host = matches
         .value_of("host")
-        .map(|a| a.parse())
+        .map(Host::parse)
         .transpose()?
         .or(host)
         .unwrap();
