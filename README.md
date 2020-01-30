@@ -1,4 +1,4 @@
-# C.U.P.S. CLI
+# CUPS CLI
 
 CUPS CLI is a terminal based client for interacting with an installed instance of the CUPS Messager sovereign app on a Start9 Server.
 
