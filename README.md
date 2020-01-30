@@ -37,7 +37,7 @@ To communicate these value to your cups-cli terminal program, run the following 
 
 ```
 $ export CUPS_HOST=<your LAN IP>
-$ export CUPS_PASSWORD=<your Cups Messager password>
+$ export CUPS_PASSWORD=<your Cups Messenger password>
 ```
 
 ### Commands and SubCommands
