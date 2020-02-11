@@ -36,7 +36,7 @@ Open your Start9 Companion App, click on the server running Cups Messenger, clic
 To communicate these value to your cups-cli terminal program, run the following in your terminal with no extra spaces or quotes:
 
 ```
-$ export CUPS_HOST=<your LAN IP>
+$ export CUPS_HOST=<your Cups onion url>
 $ export CUPS_PASSWORD=<your Cups Messenger password>
 ```
 

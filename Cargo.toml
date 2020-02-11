@@ -1,6 +1,6 @@
 [package]
 name = "cups-cli"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Aiden McClelland <me@drbonez.dev>"]
 edition = "2018"
 description = "A minimal client for Cups Instant Messanger"
