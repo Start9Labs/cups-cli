@@ -1,5 +1,5 @@
 use failure::Error;
-use reqwest as rq;
+use reqwest::{self as rq, Proxy, RequestBuilder};
 use sha3::{Digest, Sha3_256};
 use url::Host;
 
@@ -48,11 +48,33 @@ pub fn pubkey_to_onion(pubkey: &[u8]) -> Result<String, Error> {
 #[derive(Clone, Debug)]
 pub struct Creds {
     pub host: Host,
+    pub proxy: Option<Proxy>,
     pub password: String,
 }
 impl AsRef<Creds> for Creds {
     fn as_ref(&self) -> &Creds {
         self
+    }
+}
+impl Creds {
+    pub fn get(&self, rel_url: &str) -> Result<RequestBuilder, Error> {
+        Ok(if let Some(proxy) = &self.proxy {
+            rq::Client::builder().proxy(proxy.clone()).build()?
+        } else {
+            rq::Client::new()
+        }
+        .get(&format!("http://{}:59001/{}", self.host, rel_url))
+        .basic_auth("me", Some(&self.password)))
+    }
+    pub fn post<T: Into<rq::Body>>(&self, body: T) -> Result<RequestBuilder, Error> {
+        Ok(if let Some(proxy) = &self.proxy {
+            rq::Client::builder().proxy(proxy.clone()).build()?
+        } else {
+            rq::Client::new()
+        }
+        .post(&format!("http://{}:59001", self.host))
+        .basic_auth("me", Some(&self.password))
+        .body(body))
     }
 }
 
@@ -67,11 +89,7 @@ pub async fn fetch_users<C: AsRef<Creds>>(creds: C) -> Result<Vec<UserData>, Err
     use std::io::Read;
     let mut users = Vec::new();
 
-    let res = rq::Client::new()
-        .get(&format!("http://{}:59001?type=users", creds.as_ref().host))
-        .basic_auth("me", Some(&creds.as_ref().password))
-        .send()
-        .await?;
+    let res = creds.as_ref().get("?type=users")?.send().await?;
     let status = res.status();
     if !status.is_success() {
         failure::bail!("{}", status.canonical_reason().unwrap_or("UNKNOWN STATUS"));
@@ -105,13 +123,7 @@ pub async fn add_user(creds: &Creds, onion: &str, name: &str) -> Result<(), Erro
     req.push(1);
     req.extend_from_slice(onion_to_pubkey(onion)?.as_ref());
     req.extend_from_slice(name.as_bytes());
-    let status = rq::Client::new()
-        .post(&format!("http://{}:59001", creds.host))
-        .basic_auth("me", Some(&creds.password))
-        .body(req)
-        .send()
-        .await?
-        .status();
+    let status = creds.post(req)?.send().await?.status();
     if !status.is_success() {
         failure::bail!("{}", status.canonical_reason().unwrap_or("UNKNOWN STATUS"));
     }
@@ -133,24 +145,22 @@ pub async fn fetch_messages<C: AsRef<Creds>, I: AsRef<[u8; 32]>>(
     use std::io::Read;
 
     let mut msgs = Vec::new();
-    let res = rq::Client::new()
+    let res = creds
+        .as_ref()
         .get(&if let Some(limit) = limit {
             format!(
-                "http://{}:59001?type=messages&pubkey={}&limit={}",
-                creds.as_ref().host,
+                "?type=messages&pubkey={}&limit={}",
                 base32::encode(base32::Alphabet::RFC4648 { padding: false }, id.as_ref())
                     .to_lowercase(),
                 limit
             )
         } else {
             format!(
-                "http://{}:59001?type=messages&pubkey={}",
-                creds.as_ref().host,
+                "?type=messages&pubkey={}",
                 base32::encode(base32::Alphabet::RFC4648 { padding: false }, id.as_ref())
                     .to_lowercase()
             )
-        })
-        .basic_auth("me", Some(&creds.as_ref().password))
+        })?
         .send()
         .await?;
     let status = res.status();
@@ -189,13 +199,7 @@ pub async fn send_message(creds: &Creds, id: &[u8; 32], content: &str) -> Result
     req.push(0);
     req.extend_from_slice(id);
     req.extend_from_slice(content.as_bytes());
-    let status = rq::Client::new()
-        .post(&format!("http://{}:59001", creds.host))
-        .basic_auth("me", Some(&creds.password))
-        .body(req)
-        .send()
-        .await?
-        .status();
+    let status = creds.post(req)?.send().await?.status();
     if !status.is_success() {
         failure::bail!(
             "{}",

@@ -1,11 +1,21 @@
 use clap::{App, Arg, SubCommand};
 use failure::Error;
+use reqwest::Proxy;
 use url::Host;
 
 #[cfg(feature = "tui")]
 mod tui;
 
 async fn inner_main() -> Result<(), Error> {
+    let host: Option<Host> = std::env::var("CUPS_HOST")
+        .ok()
+        .map(|a| Host::parse(&a))
+        .transpose()?;
+    let proxy: Option<Proxy> = std::env::var("CUPS_PROXY")
+        .ok()
+        .map(|a| Proxy::http(&format!("socks5h://{}:9050", a)))
+        .transpose()?;
+
     let app = App::new("Cups CLI")
         .version("0.1.0")
         .author("Aiden McClelland <me@drbonez.dev>")
@@ -16,7 +26,6 @@ async fn inner_main() -> Result<(), Error> {
                 .short("p")
                 .takes_value(true),
         );
-    let host: Option<Host> = std::env::var("CUPS_HOST").ok().map(|a| Host::parse(&a)).transpose()?;
     let app = if host.is_none() {
         app.arg(
             Arg::with_name("host")
@@ -92,7 +101,15 @@ async fn inner_main() -> Result<(), Error> {
         .transpose()?
         .or(host)
         .unwrap();
-    let creds = cupslib::Creds { host, password };
+    let proxy = match &host {
+        Host::Domain(s) if s.ends_with(".onion") => Some(Proxy::http("socks5h://127.0.0.1:9050")?),
+        _ => proxy,
+    };
+    let creds = cupslib::Creds {
+        host,
+        proxy,
+        password,
+    };
     match matches.subcommand() {
         ("contacts", Some(sub_m)) => match sub_m.subcommand() {
             ("show", _) | ("list", _) | ("ls", _) => {
