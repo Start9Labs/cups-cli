@@ -16,6 +16,9 @@ pub struct Windows {
     input: Window,
 }
 
+unsafe impl std::marker::Send for Windows {}
+unsafe impl std::marker::Sync for Windows {}
+
 pub async fn tui(creds: Creds) -> Result<(), Error> {
     let main = initscr();
     let sidebar = main
@@ -154,6 +157,12 @@ where
     }
 }
 
+async fn getch(win: Arc<Windows>) -> Result<Option<Input>, Error> {
+    tokio::task::spawn_blocking(move || win.main.getch())
+        .await
+        .map_err(Error::from)
+}
+
 async fn tui_inner(win: Arc<Windows>, creds: Arc<Creds>) -> Result<(), Error> {
     let ucreds = creds.clone();
     let mcreds = creds.clone();
@@ -165,31 +174,41 @@ async fn tui_inner(win: Arc<Windows>, creds: Arc<Creds>) -> Result<(), Error> {
     .await?;
     init(&*win);
     let mut selected = Selected::Sidebar;
+    let mut chfut = Box::pin(getch(win.clone()));
     loop {
-        match win.main.getch() {
-            Some(Input::KeyResize) | Some(Input::KeyAbort) | Some(Input::Character('q')) => break,
-            Some(Input::KeySTab) | Some(Input::Character('\t')) => {
-                hide_selection(&*win, selected);
-                selected.rotate();
-                show_selection(&*win, selected);
-            }
-            Some(Input::KeyUp) => match selected {
-                Selected::Sidebar => {
-                    if state.selected > 0 {
-                        state.selected -= 1;
-                        change_sidebar_selection(
-                            &*win,
-                            &state.user_data,
-                            state.selected,
-                            state.selected + 1,
-                        )
+        use std::task::Poll;
+        match poll!(chfut.as_mut()) {
+            Poll::Ready(i) => {
+                match i? {
+                    Some(Input::KeyResize)
+                    | Some(Input::KeyAbort)
+                    | Some(Input::Character('q')) => break,
+                    Some(Input::KeySTab) | Some(Input::Character('\t')) => {
+                        hide_selection(&*win, selected);
+                        selected.rotate();
+                        show_selection(&*win, selected);
                     }
-                }
-                _ => (),
-            },
-            _ => (),
+                    Some(Input::KeyUp) => match selected {
+                        Selected::Sidebar => {
+                            if state.selected > 0 {
+                                state.selected -= 1;
+                                change_sidebar_selection(
+                                    &*win,
+                                    &state.user_data,
+                                    state.selected,
+                                    state.selected + 1,
+                                )
+                            }
+                        }
+                        _ => (),
+                    },
+                    _ => (),
+                };
+                chfut = Box::pin(getch(win.clone()));
+            }
+            Poll::Pending => (),
         }
-        state.update().await?;
+        // state.update().await?;
     }
     Ok(())
 }
@@ -198,6 +217,7 @@ fn init(win: &Windows) {
     resize_term(0, 0);
     curs_set(0);
     noecho();
+    win.main.nodelay(true);
     win.main.clear();
     win.main.border('|', '|', '-', '-', '+', '+', '+', '+');
     win.sidebar.attron(Attribute::Bold);
@@ -277,14 +297,14 @@ fn render_sidebar(win: &Windows, data: &[UserData], clear: usize, selected: usiz
         win.sidebar.clrtoeol();
         if let Some(name) = &user.name {
             win.sidebar.addstr(&format!(
-                " - {:30} -> {}",
-                &name[..std::cmp::min(name.len(), 30)],
+                "{:54} {}",
+                &name[..std::cmp::min(name.len(), 54)],
                 user.unreads
             ));
         } else {
             win.sidebar.addstr(&format!(
-                "- {}... -> {}",
-                base32::encode(base32::Alphabet::RFC4648 { padding: false }, &user.id)[..27]
+                "{} {}",
+                base32::encode(base32::Alphabet::RFC4648 { padding: false }, &user.id)
                     .to_lowercase(),
                 user.unreads
             ));
@@ -293,6 +313,7 @@ fn render_sidebar(win: &Windows, data: &[UserData], clear: usize, selected: usiz
             win.sidebar.attroff(Attribute::Reverse);
         }
     }
+    win.sidebar.refresh();
 }
 
 fn change_sidebar_selection(win: &Windows, data: &[UserData], selected: usize, clear: usize) {}

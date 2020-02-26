@@ -176,6 +176,7 @@ pub async fn fetch_messages<C: AsRef<Creds>, I: AsRef<[u8; 32]>>(
             a => a?,
         };
         let inbound = buf[0] != 0;
+        b.read_exact(&mut [0; 24])?;
         let mut buf = [0; 8];
         b.read_exact(&mut buf)?;
         let time = i64::from_be_bytes(buf);
@@ -197,6 +198,7 @@ pub async fn fetch_messages<C: AsRef<Creds>, I: AsRef<[u8; 32]>>(
 pub async fn send_message(creds: &Creds, id: &[u8; 32], content: &str) -> Result<(), Error> {
     let mut req = Vec::new();
     req.push(0);
+    req.extend_from_slice(&[0; 16]);
     req.extend_from_slice(id);
     req.extend_from_slice(content.as_bytes());
     let status = creds.post(req)?.send().await?.status();

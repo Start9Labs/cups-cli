@@ -204,7 +204,7 @@ async fn inner_main() -> Result<(), Error> {
     Ok(())
 }
 
-#[tokio::main]
+#[tokio::main(core_threads = 4)]
 async fn main() {
     match inner_main().await {
         Ok(_) => (),
